@@ -1,0 +1,30 @@
+# 依赖与构建产物（镜像内重新安装）
+node_modules
+**/node_modules
+
+# 版本控制与 CI（镜像运行不需要）
+.git
+.github
+
+# 本地数据 / 运行时产物（运行时通过挂载卷提供）
+data
+qr
+qrkeys.json
+
+# 文档与图片资源
+imgs
+*.md
+LICENSE
+
+# 环境变量与系统文件
+.env
+.env.*
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# IDE / 系统
+.vscode
+.idea
+.DS_Store
+Thumbs.db

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>kgcheckin · 控制台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%230d1117'/%3E%3Ctext x='50' y='68' font-size='52' text-anchor='middle'%3E%E2%96%88%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 顶栏：终端标识 + 状态徽章 -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-user">kgcheckin@webui</span>:<span class="brand-path">~</span>$
+      <span class="brand-cmd" id="brand-cmd">./console --start</span>
+      <span class="cursor">▊</span>
+    </div>
+    <div class="chips">
+      <span id="chip-cred" class="chip">▮ 凭据: 检测中</span>
+      <span id="chip-cron" class="chip">▮ 计划: --</span>
+      <span id="chip-run" class="chip">▮ 签到: --</span>
+      <!-- 有过期账号时才出现；数据来自公开脱敏接口，不需要账号管理密码 -->
+      <button id="btn-expired" class="chip chip-btn" hidden aria-expanded="false" title="点击查看登录已失效的账号清单（完整昵称 + 脱敏酷狗ID）">[ ⚠ 0 个账号已过期 · 点击查看 ▾ ]</button>
+    </div>
+  </header>
+
+  <!-- 过期清单：占据文档流（不浮动、无遮罩），展开时把下方内容整体下推 -->
+  <div id="expired-pop" class="expired-pop" hidden>
+    <div class="panel-head">
+      <span class="comment">// 登录已失效的账号</span>
+      <span id="expired-count" class="dim"></span>
+    </div>
+    <div id="expired-list" class="expired-list"></div>
+    <p class="tip">这些账号的 token 已被酷狗判定失效（error_code 20018），重新签到不会恢复；请用「扫码登录」或「手机号登录」重新登录，登录成功后标记会自动消失。</p>
+  </div>
+
+  <!-- 标签页（编辑器风格） -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="qr"><span class="tab-icon">▚</span>扫码登录</button>
+    <button class="tab" data-tab="phone"><span class="tab-icon">▚</span>手机号登录</button>
+    <button class="tab" data-tab="run"><span class="tab-icon">▚</span>一键签到</button>
+    <button class="tab" data-tab="accounts"><span class="tab-icon">▚</span>账号管理</button>
+  </nav>
+
+  <main>
+    <!-- 扫码登录 -->
+    <section id="panel-qr" class="panel active">
+      <div class="panel-head"><span class="comment">// 扫码登录</span><span class="dim"> — 使用「酷狗音乐」APP 扫描二维码，有效期约 2 分钟</span></div>
+      <div class="row">
+        <label class="inline-label" for="qr-count">账号数量</label>
+        <select id="qr-count" class="input narrow">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+        <button id="btn-qr-gen" class="btn primary">[ 生成二维码 ]</button>
+        <span id="qr-hint" class="dim"></span>
+      </div>
+      <div id="qr-list" class="qr-list">
+        <div class="empty dim">// 尚未生成二维码，点击上方按钮开始</div>
+      </div>
+      <p class="tip">⌘ 登录成功后凭据自动写入 <code>data/userinfo.json</code>；已登录的账号会更新 token，不会重复添加</p>
+    </section>
+
+    <!-- 手机号登录 -->
+    <section id="panel-phone" class="panel">
+      <div class="panel-head"><span class="comment">// 手机号登录</span><span class="dim"> — 获取验证码并登录</span></div>
+      <div class="field">
+        <label for="phone">手机号 <span class="dim">$PHONE</span></label>
+        <div class="row">
+          <input id="phone" class="input" type="tel" placeholder="138xxxxxxxx" maxlength="11" inputmode="numeric" autocomplete="tel" />
+        </div>
+      </div>
+      <div class="field">
+        <label for="code">验证码 <span class="dim">$CODE</span></label>
+        <div class="row">
+          <input id="code" class="input" type="text" placeholder="······" maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
+          <button id="btn-send-code" class="btn">[ 发送验证码 ]</button>
+        </div>
+      </div>
+      <div class="row">
+        <button id="btn-phone-login" class="btn primary">[ 登 录 ]</button>
+        <span id="phone-hint" class="dim"></span>
+      </div>
+      <p class="tip">⚠ 一个手机号绑定了多个酷狗账号时无法使用此方式登录，请改用扫码登录</p>
+    </section>
+
+    <!-- 一键签到 -->
+    <section id="panel-run" class="panel">
+      <div class="panel-head">
+        <span class="comment">// 一键签到</span><span class="dim"> — 填入酷狗ID 即可签到该账号（每个 ID 每天 2 次）</span>
+        <button id="btn-run-admin-toggle" class="btn ghost icon-btn" aria-pressed="false"
+                title="管理员：签到全部账号" aria-label="管理员：签到全部账号">⚙</button>
+      </div>
+
+      <!-- 模式一：指定 userid -->
+      <div class="run-block">
+        <div class="row">
+          <input id="run-userid" class="input" type="text" inputmode="numeric" placeholder="酷狗ID（userid）" autocomplete="off" />
+          <button id="btn-run-one" class="btn primary big">[ ▶ 签到该账号 ]</button>
+          <span id="run-one-quota" class="dim"></span>
+        </div>
+      </div>
+
+      <!-- 模式二：全部账号（需 admin 验证）；默认隐藏，点右上角 ⚙ 展开 -->
+      <div id="run-admin-panel" class="run-block" hidden>
+        <div class="run-block-head"><span class="comment">// 全部账号签到</span><span class="dim"> — 需 admin 账号与密码</span></div>
+        <div class="row">
+          <input id="run-admin-key" class="input" type="password" placeholder="admin 密码" autocomplete="current-password" />
+          <button id="btn-run-all" class="btn">[ ▶ 签到全部账号 ]</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="btn-clear-log" class="btn ghost">[ 清屏 ]</button>
+        <button id="btn-toggle-verbose" class="btn ghost" aria-pressed="false" title="显示/隐藏逐次领取等详细日志">[ 详细日志 ]</button>
+        <span id="run-state" class="dim">// 空闲</span>
+      </div>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><span class="term-title">checkin — live output</span></div>
+        <div class="term-body" id="term-body">
+          <div class="line dim">// 等待任务输出…（运行日志会实时滚动显示）</div>
+        </div>
+      </div>
+      <p class="tip" id="cron-tip"></p>
+    </section>
+
+    <!-- 账号管理 -->
+    <section id="panel-accounts" class="panel">
+      <div class="panel-head">
+        <span class="comment">// 账号管理</span><span class="dim"> — 数据文件 data/userinfo.json</span>
+      </div>
+
+      <!-- 独立密码锁 -->
+      <div id="accounts-lock" hidden>
+        <div class="lock-box">
+          <div class="lock-icon">🔒</div>
+          <div class="row">
+            <span class="prompt-mark">$</span>
+            <input id="accounts-id" class="input" type="text" placeholder="酷狗ID" autocomplete="off" />
+          </div>
+          <div class="row">
+            <span class="prompt-mark">$</span>
+            <input id="accounts-pwd" class="input" type="password" placeholder="密码（默认为酷狗ID本身）" autocomplete="off" />
+          </div>
+          <div class="row">
+            <button id="btn-accounts-unlock" class="btn primary">[ 解 锁 ]</button>
+            <span id="accounts-lock-msg" class="dim"></span>
+          </div>
+          <p class="tip">每个账号有独立密码（默认为酷狗ID本身），仅可查看/管理自己的账号；连续 3 次密码错误将锁定 5 分钟</p>
+        </div>
+      </div>
+
+      <div id="accounts-content" hidden>
+        <div id="accounts-default-pwd-warn" class="lock-row warn" hidden></div>
+        <div id="accounts-mail-warn" class="lock-row warn" hidden></div>
+        <div class="row">
+          <input id="accounts-search" class="input" type="search"
+                 placeholder="搜索昵称或酷狗ID…" autocomplete="off" />
+          <span id="accounts-search-count" class="dim"></span>
+        </div>
+        <div id="account-list">
+          <div class="empty dim">// 加载中…</div>
+        </div>
+        <div class="row lock-row">
+          <span id="accounts-who" class="dim"></span>
+          <button id="btn-accounts-passwd" class="btn ghost">[ 修改密码 ]</button>
+          <button id="btn-accounts-lock" class="btn ghost">[ 重新锁定 ]</button>
+        </div>
+      </div>
+
+      <p class="tip">⚠ 未修改过密码的账号默认密码为酷狗ID，建议登录后立即修改；token 已脱敏显示；删除账号不影响酷狗 APP 登录状态</p>
+    </section>
+  </main>
+
+<footer class="footer">
+    <a href="https://github.com/qfmc7040/KGM-AUTO-CHECKIN" target="_blank" rel="noopener">KGM-AUTO-CHECKIN</a>
+    <br>
+    <span class="dim">⚠️ 仅供学习交流 ⚠️ 请勿用于商业用途</span>
+    <span id="auth-state" class="dim"></span>
+</footer>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- 访问密码 -->
+  <dialog id="auth-dialog" class="auth-dialog">
+    <div class="auth-box">
+      <div class="panel-head"><span class="comment">// 需要访问密码</span></div>
+      <div class="row">
+        <span class="prompt-mark">$</span>
+        <input id="auth-input" class="input" type="password" placeholder="WEBUI_PASSWORD" />
+      </div>
+      <div class="row">
+        <button id="btn-auth-ok" class="btn primary">[ 确 认 ]</button>
+        <button id="btn-auth-cancel" class="btn ghost">[ 取消 ]</button>
+      </div>
+      <p id="auth-err" class="tip err"></p>
+    </div>
+  </dialog>
+
+  <!-- 预留通知邮箱（登录成功后弹出，可跳过） -->
+  <dialog id="email-dialog" class="auth-dialog">
+    <div class="auth-box">
+      <div class="panel-head"><span class="comment">// 预留通知邮箱</span></div>
+      <p id="email-hint" class="tip"></p>
+      <div class="row">
+        <span class="prompt-mark">$</span>
+        <input id="email-input" class="input" type="email" placeholder="you@example.com" autocomplete="off" />
+        <button id="btn-email-send-code" class="btn ghost">[ 发送验证码 ]</button>
+      </div>
+      <div class="row" id="email-code-row" hidden>
+        <span class="prompt-mark">$</span>
+        <input id="email-code" class="input" type="text" inputmode="numeric" maxlength="6"
+               placeholder="6 位验证码" autocomplete="off" />
+      </div>
+      <div class="row">
+        <button id="btn-email-verify" class="btn primary" disabled>[ 验证并保存 ]</button>
+        <button id="btn-email-skip" class="btn ghost">[ 以后再说 ]</button>
+      </div>
+      <p id="email-msg" class="tip"></p>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

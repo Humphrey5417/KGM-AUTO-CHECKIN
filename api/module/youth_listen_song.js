@@ -8,7 +8,7 @@ module.exports = (params, useAxios) => {
     url: '/youth/v2/report/listen_song',
     data: dataMap,
     method: 'POST',
-    encryptType: 'android',
+    encryptTyPe: 'android',
     params: { clientver: 10566 },
     cookie: params?.cookie,
     headers: {

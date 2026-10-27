@@ -1,0 +1,598 @@
+/* kgcheckin webui —— 终端 / 代码编辑器风格 */
+
+:root {
+  --bg: #0a0d12;
+  --bg-panel: #0d1117;
+  --bg-inset: #010409;
+  --border: #21262d;
+  --border-light: #30363d;
+  --text: #c9d1d9;
+  --dim: #8b949e;
+  --green: #3fb950;
+  --cyan: #58a6ff;
+  --yellow: #d29922;
+  --red: #f85149;
+  --magenta: #bc8cff;
+  --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { color-scheme: dark; }
+
+body {
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  background:
+    repeating-linear-gradient(0deg, transparent 0 2px, rgba(255, 255, 255, 0.012) 2px 4px),
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(88, 166, 255, 0.06), transparent),
+    var(--bg);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ───────────── 顶栏 ───────────── */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(13, 17, 23, 0.8);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+}
+
+.brand { font-weight: 600; }
+.brand-user { color: var(--green); }
+.brand-path { color: var(--cyan); }
+.brand-cmd { color: var(--text); }
+
+.cursor {
+  display: inline-block;
+  color: var(--green);
+  animation: blink 1.1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.chip {
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.chip.ok { color: var(--green); border-color: rgba(63, 185, 80, 0.4); }
+.chip.warn { color: var(--yellow); border-color: rgba(210, 153, 34, 0.4); }
+.chip.err { color: var(--red); border-color: rgba(248, 81, 73, 0.4); }
+.chip.info { color: var(--cyan); border-color: rgba(88, 166, 255, 0.4); }
+
+/* 账号面板：默认密码（酷狗ID）登录、或服务端未配置 SMTP 时的醒目提示条 */
+#accounts-default-pwd-warn.warn,
+#accounts-mail-warn.warn {
+  color: var(--yellow);
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.4);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+  white-space: normal;
+}
+
+/* ───────────── 标签页 ───────────── */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 12px 20px 0;
+  max-width: 980px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.tab {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
+.tab.active {
+  color: var(--green);
+  background: var(--bg-panel);
+  border-color: var(--border-light);
+  box-shadow: inset 0 2px 0 var(--green);
+}
+.tab-icon { color: var(--border-light); margin-right: 6px; }
+.tab.active .tab-icon { color: var(--green); }
+
+/* ───────────── 面板 ───────────── */
+
+main {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 20px 40px;
+  flex: 1;
+}
+
+.panel {
+  display: none;
+  border: 1px solid var(--border-light);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg-panel);
+  padding: 20px;
+  min-height: 380px;
+}
+.panel.active { display: block; animation: fadein 0.2s ease; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 15px;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+}
+.comment { color: var(--magenta); }
+.dim { color: var(--dim); }
+.tip {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.tip.err { color: var(--red); }
+.tip code, .dim code {
+  color: var(--cyan);
+  background: rgba(88, 166, 255, 0.08);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.empty { padding: 30px 0; text-align: center; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.inline-label { color: var(--dim); font-size: 13px; }
+
+/* 签到页的两种模式分区：单账号 / 全部账号，用左侧竖线区分，避免误点 */
+.run-block {
+  border-left: 2px solid var(--border-light);
+  padding-left: 12px;
+  margin-bottom: 14px;
+}
+.run-block-head {
+  font-size: 13px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.run-block .row { margin-bottom: 0; }
+.run-block .input { max-width: 240px; }
+
+/* 方案 B：面板标题右侧的齿轮图标按钮（管理员功能入口） */
+.icon-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 15px;
+  line-height: 1.2;
+  color: var(--dim);
+  border-color: transparent;
+  background: transparent;
+}
+.icon-btn:hover:not(:disabled) {
+  color: var(--green);
+  border-color: var(--border-light);
+  box-shadow: none;
+}
+.icon-btn.active {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+/* 搜索命中高亮 */
+mark.hit {
+  background: rgba(210, 168, 255, 0.28);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.field { margin-bottom: 16px; }
+.field > label {
+  display: block;
+  font-size: 13px;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+
+.input {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 8px 12px;
+  width: 240px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input:focus { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15); }
+.input.narrow { width: 80px; }
+select.input { width: auto; min-width: 80px; }
+
+.prompt-mark { color: var(--green); font-weight: 700; }
+
+/* ───────────── 按钮 ───────────── */
+
+.btn {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  box-shadow: 0 0 12px rgba(88, 166, 255, 0.15);
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn.primary {
+  color: #04150a;
+  background: var(--green);
+  border-color: var(--green);
+  font-weight: 700;
+}
+.btn.primary:hover:not(:disabled) {
+  background: #46c95c;
+  border-color: #46c95c;
+  color: #04150a;
+  box-shadow: 0 0 16px rgba(63, 185, 80, 0.35);
+}
+.btn.big { font-size: 15px; padding: 10px 22px; }
+.btn.ghost { background: transparent; }
+.btn.ghost:hover:not(:disabled) { color: var(--red); border-color: var(--red); box-shadow: none; }
+.btn.danger-ghost { background: transparent; color: var(--dim); }
+.btn.danger-ghost:hover:not(:disabled) { color: var(--red); border-color: var(--red); box-shadow: none; }
+
+/* ───────────── 二维码卡片 ───────────── */
+
+.qr-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  justify-content: center;
+}
+
+.qr-card {
+  width: 280px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+  background: var(--bg-inset);
+}
+.qr-card h3 {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--dim);
+  margin-bottom: 12px;
+}
+.qr-img-wrap {
+  display: inline-block;
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px;
+  line-height: 0;
+}
+.qr-img-wrap img { width: 210px; height: 210px; border-radius: 4px; }
+.qr-card.done { border-color: rgba(63, 185, 80, 0.5); }
+.qr-card.done .qr-img-wrap { filter: blur(3px) brightness(0.8); }
+.qr-card .qr-status { margin-top: 12px; font-size: 13px; color: var(--dim); }
+.qr-card .qr-status.ok { color: var(--green); }
+.qr-card .qr-status.err { color: var(--red); }
+.qr-card .qr-status.wait { color: var(--yellow); }
+
+/* ───────────── 终端窗口 ───────────── */
+
+.term {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 6px;
+  background: var(--bg-inset);
+}
+
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #161b22;
+  border-bottom: 1px solid var(--border);
+}
+.term-bar i {
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.term-bar i:nth-child(1) { background: #ff5f57; }
+.term-bar i:nth-child(2) { background: #febc2e; }
+.term-bar i:nth-child(3) { background: #28c840; }
+.term-title { margin-left: 10px; font-size: 12px; color: var(--dim); }
+
+.term-body {
+  height: 380px;
+  overflow-y: auto;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.term-body .line { padding: 0 0 0 12px; text-indent: -12px; }
+.term-body .line.sys { color: var(--magenta); }
+.term-body .line.ok { color: var(--green); }
+.term-body .line.err { color: var(--red); }
+.term-body .line .ts { color: #484f58; }
+
+/* 账号序号「[#4/28]」定宽显示：同一账号及不同账号的后续文字都从同一列开始。
+   用固定像素宽度而非 ch（ch 依赖字体实际字形宽度，在回退字体下会漂移）。
+   序号在 main.js 中已零填充为等宽（[#01/36]…[#36/36]），此处再给一个固定下限，
+   保证任意等宽字体/字号下所有编号都占同一列。 */
+.term-body .line .acct-tag {
+  display: inline-block;
+  min-width: 72px;
+  color: #6e7681;
+}
+
+/* 详细日志行：默认（简化模式）隐藏，切到 .term.verbose 时才显示。
+   用 display 而非 visibility，避免隐藏行仍占用滚动高度。 */
+.term:not(.verbose) .term-body .line.muted-line { display: none; }
+
+/* 折叠汇总行：灰色斜体，与「// 注释」风格一致，不抢眼。 */
+.term-body .line.skip-summary { color: var(--dim); font-style: italic; }
+.term.verbose .term-body .line.skip-summary { display: none; }
+
+/* 开关按钮激活态 */
+#btn-toggle-verbose[aria-pressed="true"] {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+/* ANSI 颜色 */
+.c-red { color: var(--red); }
+.c-green { color: var(--green); }
+.c-yellow { color: var(--yellow); }
+.c-blue { color: var(--cyan); }
+.c-magenta { color: var(--magenta); }
+.c-dim { color: var(--dim); }
+
+.term-body::-webkit-scrollbar { width: 8px; }
+.term-body::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 4px; }
+
+/* ───────────── 账号列表 ───────────── */
+
+.account-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--bg-inset);
+}
+.account-item .acct-main { display: flex; flex-direction: column; }
+.account-item .acct-id { color: var(--cyan); }
+.account-item .acct-sub { font-size: 12px; color: var(--dim); }
+/* 凭据失效：酷狗已明确返回 20018，只能重新登录，签到重跑不会恢复 */
+.account-item .acct-sub.bad { color: var(--red); }
+/* 仍在使用默认密码的提醒 */
+.account-item .acct-sub.warn { color: var(--yellow); }
+.account-item .idx { color: var(--magenta); margin-right: 8px; }
+.account-item .acct-name { color: var(--yellow); font-weight: bold; }
+.account-item .acct-sep { color: var(--dim); margin: 0 8px; }
+/* 操作按钮竖排：账号信息行数变多后，横排会被挤成两行 */
+.account-item .acct-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+.account-item .acct-mail { color: var(--cyan); }
+
+/* ───────────── 账号管理密码锁 ───────────── */
+
+.lock-box {
+  border: 1px dashed var(--border-light);
+  border-radius: 10px;
+  padding: 28px 20px;
+  text-align: center;
+  background: var(--bg-inset);
+}
+.lock-icon { font-size: 26px; margin-bottom: 10px; }
+.lock-box .row { justify-content: center; }
+.lock-box .input { width: 260px; }
+.lock-row { margin-top: 14px; }
+
+#accounts-lock-msg { min-height: 20px; }
+#accounts-lock-msg.err { color: var(--red); }
+
+/* ───────────── 其他 ───────────── */
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  max-width: 420px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: #161b22;
+  color: var(--text);
+  font-size: 13px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all 0.25s;
+  pointer-events: none;
+  z-index: 50;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast.ok { border-color: rgba(63, 185, 80, 0.6); }
+.toast.err { border-color: rgba(248, 81, 73, 0.6); }
+
+.auth-dialog {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  color: var(--text);
+  padding: 20px;
+  min-width: 320px;
+}
+.auth-dialog::backdrop { background: rgba(1, 4, 9, 0.7); }
+#auth-err:empty { display: none; }
+
+/* 预留通知邮箱弹窗：复用 auth-dialog 外观，只补宽度与输入框伸展 */
+/* min() 让窄屏（手机浏览器）也能完整显示：固定 420px 会在 360px 宽屏上溢出视口 */
+#email-dialog { min-width: min(420px, 92vw); max-width: min(92vw, 520px); }
+#email-dialog .input { flex: 1; min-width: 0; width: auto; }
+#email-dialog .tip { margin-top: 8px; }
+/* 提示区为空时不占位，避免弹窗高度跳动 */
+#email-msg:empty, #email-hint:empty { display: none; }
+
+/* ───────────── 账号过期清单（顶栏下拉面板） ───────────── */
+
+/* 顶栏状态条里的「N 个账号已过期」入口：沿用 chip 外观，但可点击 */
+.chip-btn {
+  cursor: pointer;
+  font-family: inherit;
+  background: transparent;
+  /* 与其他 chip 同高，避免顶栏被撑开 */
+  padding: 3px 10px;
+}
+.chip-btn:hover { border-color: var(--red); color: var(--red); }
+.chip-btn.warn {
+  color: var(--red);
+  border-color: rgba(248, 81, 73, 0.45);
+}
+
+/* 有失效账号时轻微脉冲，提示这里可以点；展开后停止，避免一直闪 */
+@keyframes expired-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(248, 81, 73, 0);
+    border-color: rgba(248, 81, 73, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(248, 81, 73, 0.16);
+    border-color: var(--red);
+  }
+}
+.chip-btn.warn:not(.open) { animation: expired-pulse 2.4s ease-in-out infinite; }
+.chip-btn.open {
+  color: var(--red);
+  border-color: var(--red);
+  background: rgba(248, 81, 73, 0.12);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chip-btn.warn:not(.open) { animation: none; }
+}
+
+/* 过期清单：走文档流，展开时把标签页与主内容整体下推，不覆盖任何内容 */
+.expired-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* 与 main 的内容宽度对齐（main 为 max-width 980 + 左右 20 padding） */
+  width: calc(100% - 40px);
+  max-width: 940px;
+  margin: 12px auto 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+.expired-pop[hidden] { display: none; }
+.expired-pop .panel-head { margin: 0; }
+.expired-list {
+  flex: 1 1 auto;
+  min-height: 40px;
+  /* 账号很多时在列表内部滚动，避免把页面推得过长 */
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-inset);
+  padding: 4px 0;
+}
+.expired-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px dashed var(--border);
+}
+.expired-item:last-child { border-bottom: none; }
+.expired-item .expired-idx { color: var(--dim); min-width: 34px; }
+.expired-item .expired-name {
+  color: var(--yellow);
+  font-weight: bold;
+  /* 昵称可能很长，允许换行而不是撑破面板 */
+  overflow-wrap: anywhere;
+}
+.expired-item .expired-uid { color: var(--cyan); margin-left: auto; white-space: nowrap; }
+.expired-item .expired-at { color: var(--dim); font-size: 12px; white-space: nowrap; }
+.expired-empty { padding: 14px 12px; text-align: center; }
+.expired-pop .tip { margin: 0; font-size: 12px; }
+
+@media (max-width: 560px) {
+  .qr-card { width: 100%; }
+  .input { width: 100%; }
+  .field .row .input { width: auto; flex: 1; }
+}

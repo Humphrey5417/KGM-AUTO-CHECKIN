@@ -14,7 +14,7 @@ module.exports = (params, useAxios) => {
   const dataMap = {
     area_code: '1',
     behavior: 'play',
-    qualities: ['128', '320', 'flac', 'high', 'multitrack', 'viper_atmos', 'viper_tape', 'viper_clear'],
+    qualities: ['128', '320', 'flac', 'high', 'multitrack', 'viper_atmos', 'viper_tape', 'viper_clear', 'super'],
     'resource': {
       'album_audio_id': params.album_audio_id,
       'collect_list_id': '3',
@@ -29,7 +29,7 @@ module.exports = (params, useAxios) => {
       all_m: 1,
       auth: '',
       is_free_part: params?.free_part ? 1 : 0,
-      key: cryptoMd5(`${params.hash}185672dd44712f60bb1736df5a377e82${appid}${cryptoMd5(dfid)}${cryptoMd5(dfid).slice(0, 7)}${userid}`),
+      key: cryptoMd5(`${params.hash}185672dd44712f60bb1736df5a377e82${appid}${params?.cookie?.KUGOU_API_MID}${userid}`),
       module_id: 0,
       need_climax: 1,
       need_xcdn: 1,

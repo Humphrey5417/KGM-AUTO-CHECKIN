@@ -2,8 +2,10 @@ name: 仓库保活
 
 on:
   schedule:
-    # 每月 1 号运行一次，避免仓库未更新导致 Actions 被禁用
-    - cron: '0 0 1 * *'
+    # 每月运行一次，避免仓库未更新导致 Actions 被禁用
+    # GitHub Actions 的 schedule 只支持 UTC，不支持 timezone 字段。
+    # UTC 每月 1 号 16:00 = 北京时间每月 2 号 00:00
+    - cron: '0 16 1 * *'
   workflow_dispatch:
 
 jobs:
@@ -14,7 +16,7 @@ jobs:
 
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

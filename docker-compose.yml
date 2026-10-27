@@ -1,0 +1,127 @@
+# kgcheckin —— 酷狗概念版自动签到（Docker 部署）
+#
+# 默认启动「WebUI + 定时调度」一体化容器：
+#   - 浏览器打开 http://localhost:3000 使用控制台（扫码登录 / 手机号登录 / 一键签到 / 账号管理）
+#   - 每天北京时间 01:10 自动签到（CRON_SCHEDULE 可改）
+#
+# 私密配置（通知渠道密钥、WebUI 密码等）写在 .env 文件中（已被 .gitignore 忽略），
+# 会自动替换下面 ${VAR} 形式的引用；参考 .env.example。
+#
+# 常用命令：
+#   docker compose up -d --build      构建并后台启动
+#   docker compose logs -f            查看日志
+#   docker compose down               停止
+#
+# 手动操作（一次性任务，跑完自动退出）：
+#   docker compose run --rm kgcheckin node scheduler.js once     立即签到一次（命令行方式）
+#   docker compose run --rm kgcheckin node qrcodeLogin.js gen    命令行生成登录二维码（扫 data/qr/login.html）
+#   docker compose run --rm kgcheckin node qrcodeLogin.js wait   命令行等待扫码并保存凭据
+#
+# 不需要 WebUI（仅定时调度，不映射端口）：
+#   将 command 改回 ["node", "scheduler.js"] 并删除 ports 即可。
+services:
+  kgcheckin:
+    build: .
+    image: kgcheckin:latest
+    container_name: kgcheckin
+    restart: unless-stopped
+    # WebUI + 内置定时调度一体化入口
+    command: node webui/server.js
+    ports:
+      - "14725:3000"                    # WebUI 控制台，按需改为 "8080:3000" 等
+    environment:
+      # ── WebUI ──
+      WEBUI_PORT: "3000"
+      WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}   # 可选访问密码，在 .env 中设置；公网暴露时强烈建议启用
+      # 部署在 Nginx/Caddy/Cloudflare Tunnel 等反向代理之后时必须设为 1，以信任 X-Forwarded-For 取真实客户端 IP。
+      # 未设置则不信任该头（防止伪造 IP 绕过防爆破计数）；仅直连时无需设置。
+      # ⚠ 公网部署若忘了设置，所有外部请求都会被当成同一个代理内网地址，
+      #    账号防爆破的 IP 桶会互相拖累、二维码限流会被整体豁免（启动横幅会红字提醒）。
+      WEBUI_TRUST_PROXY: ${WEBUI_TRUST_PROXY:-}
+      # ── 账号管理 ──
+      # admin 管理员密码。未修改过密码的普通账号，其默认密码即酷狗ID。
+      ACCOUNTS_PASSWORD: ${ACCOUNTS_PASSWORD:-}
+      # 首次启动且尚无密码文件时，用它初始化 admin 密码（之后可删除该变量）
+      ACCOUNTS_BOOTSTRAP_PASSWORD: ${ACCOUNTS_BOOTSTRAP_PASSWORD:-}
+      # 防爆破：单账号 / 单 IP 双维度锁定（默认 3 次 / 15 次，锁定 5 分钟）
+      ACCOUNTS_MAX_ATTEMPTS: ${ACCOUNTS_MAX_ATTEMPTS:-}
+      ACCOUNTS_IP_MAX_ATTEMPTS: ${ACCOUNTS_IP_MAX_ATTEMPTS:-}
+      ACCOUNTS_LOCK_MINUTES: ${ACCOUNTS_LOCK_MINUTES:-}
+      # 设为 true 关闭「默认密码 = 酷狗ID」；此后未设密码的账号须由 admin 先设置密码。
+      # 公网暴露时建议设为 true（酷狗ID 对他人可见，知道 ID 即可登录并改密）。
+      ACCOUNTS_DISABLE_ID_DEFAULT: ${ACCOUNTS_DISABLE_ID_DEFAULT:-}
+      # ── 公网接口限流（防止匿名刷接口：发送短信验证码 / 生成登录二维码）──
+      # 格式均为 "次数/分钟"；留空使用默认值；设为 "0/1" 可关闭该项。
+      # 除二维码生成外均按 全局 / 手机号 / 账号 计数，不依赖来源 IP：容器端口映射下
+      # req.ip 恒为网桥地址，开 trust proxy 后又取自可伪造的 X-Forwarded-For。
+      # 发送验证码：默认全服务每小时 20 次、每手机号 24 小时 2 次（防止被用作短信轰炸机）。
+      WEBUI_PHONE_SEND_GLOBAL_LIMIT: ${WEBUI_PHONE_SEND_GLOBAL_LIMIT:-}
+      WEBUI_PHONE_SEND_PHONE_LIMIT: ${WEBUI_PHONE_SEND_PHONE_LIMIT:-}
+      # 生成登录二维码：仍按 IP，默认每 IP 每 3 分钟 1 次（每次都会向酷狗申请新的登录 key），
+      # 内网 / 本机 IP 自动豁免；反向代理部署必须正确设置 WEBUI_TRUST_PROXY，否则整体豁免。
+      WEBUI_QR_GEN_IP_LIMIT: ${WEBUI_QR_GEN_IP_LIMIT:-}
+      # ── 酷狗设备标识（建议固定：频繁更换设备会被风控静默丢弃验证码短信；在 .env 中设置）──
+      KUGOU_API_GUID: ${KUGOU_API_GUID:-}
+      KUGOU_API_MID: ${KUGOU_API_MID:-}
+      KUGOU_API_DEV: ${KUGOU_API_DEV:-}
+      # ── 调度 ──
+      # 注意：签到的日期/星期计算与容器时区无关，统一按北京时间处理。
+      CRON_SCHEDULE: "10 1 * * *"      # 每天北京时间 01:10 签到
+      CRON_TIMEZONE: Asia/Shanghai     # 调度器使用的时区
+      RUN_ON_STARTUP: "false"          # true：容器启动后立即执行一次签到
+      CHECKIN_CONCURRENCY: ${CHECKIN_CONCURRENCY:-}   # 多账号并行：默认全部账号同时并行；设 N 限 N 路；1 = 逐个串行
+      # 设为 true 时跳过「当日已完成签到」的账号，避免重复请求酷狗接口（默认关闭）
+      CHECKIN_SKIP_DONE: ${CHECKIN_SKIP_DONE:-}
+      # 手动「立即签到」只按账号限流，不按来源 IP（容器端口映射下 req.ip 恒为网桥地址）。
+      # 单账号签到的每日配额：每个 userid 每天最多 N 次（按北京时间跨天重置）。
+      # 「全部账号签到」需 admin 验证，不占用该配额。默认 2 次。
+      CHECKIN_PER_USERID_DAILY: ${CHECKIN_PER_USERID_DAILY:-2}
+      # ── 凭据（二选一）──
+      # 方式一（推荐）：在 WebUI 里扫码/手机号登录，凭据自动保存到挂载卷 data/userinfo.json
+      # 方式二：直接贴入已有的 USERINFO（与 GitHub Actions 的 Secret 格式一致）
+      # USERINFO: '[{"userid":"123456","token":"xxxxxxxx"}]'
+      # ── 通知渠道（全部可选；在 .env 中填值即可启用，手动与定时签到都会推送）──
+      WECOM_BOT_KEY: ${WECOM_BOT_KEY:-}
+      DINGTALK_BOT_KEY: ${DINGTALK_BOT_KEY:-}
+      DINGTALK_SECRET: ${DINGTALK_SECRET:-}
+      FEISHU_BOT_KEY: ${FEISHU_BOT_KEY:-}
+      YUNHU_BOT_KEY: ${YUNHU_BOT_KEY:-}
+      SERVERCHAN_SENDKEY: ${SERVERCHAN_SENDKEY:-}
+      PUSHPLUS_TOKEN: ${PUSHPLUS_TOKEN:-}
+      PUSHPLUS_TOPIC: ${PUSHPLUS_TOPIC:-}
+      TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
+      TG_CHAT_ID: ${TG_CHAT_ID:-}
+      BARK_KEY: ${BARK_KEY:-}
+      BARK_GROUP: ${BARK_GROUP:-}
+      DISCORD_WEBHOOK: ${DISCORD_WEBHOOK:-}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-}
+      MAIL_USER: ${MAIL_USER:-}
+      MAIL_PASS: ${MAIL_PASS:-}
+      MAIL_TO: ${MAIL_TO:-}
+      # ── 按账号的失效邮件提醒（用户自己预留邮箱并验证，登录失效时单独通知本人）──
+      # 发件人显示名（From 头里的名称部分），默认「酷狗签到助手」
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-}
+      # 失效邮件开关：留空=开启；设为 false/0 关闭
+      MAIL_INVALID_NOTIFY: ${MAIL_INVALID_NOTIFY:-}
+      # 同一账号的失效提醒冷却天数，默认 7（即每 7 天最多提醒一次）
+      MAIL_NOTICE_COOLDOWN_DAYS: ${MAIL_NOTICE_COOLDOWN_DAYS:-}
+      # 邮箱验证码发送限流：默认每账号每小时 3 次（按账号计数，不依赖来源 IP）
+      WEBUI_EMAIL_SEND_USER_LIMIT: ${WEBUI_EMAIL_SEND_USER_LIMIT:-}
+      # WebUI 公网地址：会附加在失效邮件正文里，方便用户点开重新登录（可选）
+      WEBUI_PUBLIC_URL: ${WEBUI_PUBLIC_URL:-}
+      # ── 其他（一般无需修改）──
+      # PAT: ""                        # 仅当仍需把 token 刷新同步回 GitHub Secret 时才需要
+      # GITHUB_REPOSITORY: ""          # 同上，需与 PAT 配合使用
+      # WEBUI_API_PORT: "3010"         # 容器内登录用 API 服务端口
+      # CHECKIN_API_PORT: "3020"       # 容器内签到子进程 API 服务端口
+    volumes:
+      - ./data:/app/data               # 凭据 userinfo.json（token 周刷新自动写回）
+    # 容器健康检查：命中 WebUI 的免鉴权 /healthz（不依赖 curl，alpine 镜像内自带 node）。
+    # 注意不要改成 /api/status —— 该接口受 WEBUI_PASSWORD 保护，设了密码后会一直 401。
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.WEBUI_PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

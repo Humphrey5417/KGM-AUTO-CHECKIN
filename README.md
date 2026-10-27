@@ -1,9 +1,21 @@
 # 酷狗概念版签到
-【在原项目基础上对齐 KuGouMusicApi v1.5.1】
+【对齐上游 KuGouMusicApi v1.6.2】
 
-GitHub Actions 实现 `酷狗概念VIP` 自动签到，每天领取总计 `两天酷狗概念VIP`
+自动领取 `酷狗概念VIP`，每天领取总计 `两天酷狗概念VIP`
+
+支持两种部署方式：
+
+- **Docker 部署（推荐）**：部署到自己的服务器 / NAS，内置定时调度 + **WebUI 控制台**（扫码登录 / 手机号登录 / 一键签到 / 账号管理），无需 GitHub Actions（见下方 [Docker 部署](#docker-部署)）
+- **GitHub Actions 部署**：Fork 本仓库白嫖 Actions，每天定时签到（见下方折叠的部署教程）
 
 登录后即可使用，目前提供二维码登录(推荐)和手机号登录(一个手机号绑定多个账号无法登录，见 [多账号登录问题](https://github.com/MakcRe/KuGouMusicApi/issues/51))
+
+### 项目试用链接
+账号管理需输入酷狗ID 与密码（**未改过密码的账号，默认密码即其酷狗ID**，登录后请及时修改）；酷狗ID 请于酷狗概念APP **[我的]→[设置]→[消息和绑定设置]→[酷狗ID]** 查看
+
+```htlm
+https://kg.neteaseapi.cc.cd/
+```
 
 ## 免责声明
 
@@ -25,7 +37,7 @@ GitHub Actions 实现 `酷狗概念VIP` 自动签到，每天领取总计 `两�
 > 若登录后听歌领取失败，请到APP 活动中心->天天签到领VIP(这个活动新用户好像没有) 查看当日是否已经领取VIP。
 
 > [!CAUTION]
-> **常见错误**：
+> **Github Actions部署 常见错误**：
 > 
 > 执行签到报错未配置，为`PAT`秘钥权限设置问题，需正确设置`PAT Secret`权限并再次执行登录，**Repository secrets**处除了配置的**PAT Secret**外，成功写入**USERINFO**即可正常执行签到
 > 
@@ -37,9 +49,144 @@ GitHub Actions 实现 `酷狗概念VIP` 自动签到，每天领取总计 `两�
 > 
 > **在仓库`Settings`设置`PAT Secret`，再执行登录 确保`Secrets and variables` - `Actions`中成功写入`USERINFO`再执行签到**
 
+$${\color{red}避免将PAT秘钥复制于Windows记事本中，可能存在的字号字体问题会导致秘钥中所有下划线消失导致秘钥出错}$$
+
+## Docker 部署
+
+在任意一台服务器 / NAS（能访问外网即可）上用 Docker 常驻运行，容器内置定时调度，**每天北京时间 01:10 自动签到**，不依赖 GitHub Actions 与 GitHub Secret。
+
+### 1. 获取代码
+
+```bash
+git clone <本仓库地址> kgcheckin
+cd kgcheckin
+```
+
+### 2. 构建并启动
+
+```bash
+docker compose up -d --build
+docker compose logs -f        # 查看日志，Ctrl+C 退出（容器继续运行）
+```
+
+容器启动后同时具备 **WebUI 控制台 + 定时自动签到**，无需任何其他配置。
+
+容器内置健康检查（每 30 秒探测 WebUI 的 `/healthz`，该端点不受 `WEBUI_PASSWORD` 保护），可用 `docker ps` 查看状态：
+
+```bash
+docker ps                       # STATUS 列显示 (healthy) 即正常
+docker inspect --format '{{.State.Health.Status}}' kgcheckin
+```
+
+#### 参照模板 ".env.example" 新建自己本地的 ".env" 配置文件 不要在模板上修改！！！
+
+### 3. WebUI 控制台（推荐）
+
+浏览器打开 `http://<服务器IP>:14725`，即可使用终端风格的可视化控制台：
+
+| 功能 | 说明 |
+|------|------|
+| **扫码登录** | 选择账号数量 → 生成二维码 → 酷狗音乐 APP 扫码确认，凭据自动保存；多账号并行轮询扫码状态 |
+| **手机号登录** | 输入手机号发送验证码（60s 冷却）→ 输入验证码一键登录 |
+| **一键签到** | 点击立即执行签到，实时彩色终端输出（与 Actions 运行日志一致），签到结束显示退出码；**当日已完成签到的账号自动跳过**（不再重复请求酷狗 API；通知单独标记"跳过"，全部跳过时不重复发送通知）；**多账号全部并行签到**（`CHECKIN_CONCURRENCY` 可限流，1 为串行） |
+| **账号管理** | 每账号独立密码（scrypt 哈希存储）：**未修改过密码的账号默认密码即其酷狗ID**，用户可凭此登录后自助修改密码（登录时会提示尽快改密）；仅可查看/管理自己的账号。管理员账号 `admin`（密码为 `ACCOUNTS_PASSWORD`，或用 `ACCOUNTS_BOOTSTRAP_PASSWORD` 首次初始化）可查看/管理所有账号，也可为任意账号设置密码；防爆破为**单账号 + 单 IP 双维度**锁定（默认账号 3 次 / IP 15 次错误，锁定 5 分钟），单账号被锁不影响其他账号 |
+
+> - 公网暴露时，请在 `.env` 中设置 `WEBUI_PASSWORD`（全局访问密码）与 `ACCOUNTS_PASSWORD`（账号管理 admin 管理员密码），参考 `.env.example`
+> - ⚠ **关于默认密码**：酷狗ID 并非秘密（账号列表接口会返回，用户之间也会互相告知），因此知道某个 ID 的人可以登录该账号并改掉密码。该默认值为「方便用户首次改密」而保留；公网部署请设置 `WEBUI_PASSWORD`，或设 `ACCOUNTS_DISABLE_ID_DEFAULT=true` 改用「由 admin 分发密码」的方式
+> - 部署在反向代理之后时**必须**设置 `WEBUI_TRUST_PROXY`，否则所有外部请求会被视为同一个代理内网地址——账号防爆破的 IP 桶会互相拖累（一人被锁波及所有人）、二维码限流会被整体豁免；未设置时系统不会信任 `X-Forwarded-For`，以防伪造 IP 绕过计数。启动横幅会在未设置时红字提醒
+> - 发送短信验证码与生成登录二维码的接口均可匿名调用，已内置滑动窗口限流（可用 `WEBUI_PHONE_SEND_GLOBAL_LIMIT`、`WEBUI_PHONE_SEND_PHONE_LIMIT`、`WEBUI_QR_GEN_IP_LIMIT` 调整），防止本服务被当作短信轰炸机使用。其中短信验证码按「全局 + 手机号」计数，不依赖来源 IP——容器端口映射下 `req.ip` 恒为网桥地址、反向代理下又来自可伪造的 `X-Forwarded-For`，按 IP 计数在生产部署里并不可靠
+> - 通知渠道密钥同样建议写在 `.env`（自动注入容器，不会被提交到仓库）
+
+### 4. 命令行登录（可选）
+
+不想用 WebUI 时也可以纯命令行完成登录：
+
+**方式一：二维码登录（推荐）**
+
+```bash
+# 第 1 步：生成登录二维码
+docker compose run --rm kgcheckin node qrcodeLogin.js gen
+# 第 2 步：用浏览器打开 data/qr/login.html，使用「酷狗音乐 APP」扫码并确认（二维码有效期约 2 分钟）
+# 第 3 步：等待扫码结果并保存凭据
+docker compose run --rm kgcheckin node qrcodeLogin.js wait
+```
+
+看到「登录成功」后，凭据已自动保存到 `data/userinfo.json`。
+
+> 多账号追加：重新执行上面 3 步即可；`wait` 一步加参数 `-e APPEND_USER=是`，例如
+> `docker compose run --rm -e APPEND_USER=是 kgcheckin node qrcodeLogin.js wait`（追加保留已有账号，仅更新/新增）
+
+**方式二：手机号登录**
+
+```bash
+# 发送验证码
+docker compose run --rm -e PHONE=138xxxxxxxx kgcheckin npm run sent
+# 提交验证码完成登录
+docker compose run --rm -e PHONE=138xxxxxxxx -e CODE=123456 kgcheckin npm run phoneLogin
+```
+
+### 4. 完成
+
+登录完成后容器即按计划自动签到（默认每天北京时间 01:10），无需其他配置。也可以在 WebUI 点击「立即签到」手动验证：
+
+```bash
+docker compose run --rm kgcheckin node scheduler.js once   # 或命令行方式立即签到一次
+```
+
+### 4.1 已有 USERINFO？（从 Actions 迁移）
+
+如果之前在 GitHub Actions 使用过，可直接把 Secret `USERINFO` 的内容贴到 `docker-compose.yml` 的 `USERINFO` 环境变量中，跳过第 3 步登录。
+
+### 配置说明（docker-compose.yml `environment`）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `WEBUI_PORT` | `14725` | WebUI 控制台监听端口 |
+| `WEBUI_PASSWORD` | - | 可选访问密码；设置后所有 API 需携带密钥（公网暴露时建议设置，写在 `.env` 中） |
+| `ACCOUNTS_PASSWORD` | - | 账号管理模块 admin 管理员密码；普通账号未改过密码时以「酷狗ID」作为默认密码登录，admin 可管理所有账号 |
+| `ACCOUNTS_BOOTSTRAP_PASSWORD` | - | 首次启动且尚无密码文件时，用它初始化 admin 密码 |
+| `ACCOUNTS_MAX_ATTEMPTS` / `ACCOUNTS_LOCK_MINUTES` | `3` / `5` | 可选覆盖防爆破策略（单账号最大错误次数 / 锁定时长） |
+| `ACCOUNTS_IP_MAX_ATTEMPTS` | `ACCOUNTS_MAX_ATTEMPTS × 5` | 单个 IP 的最大错误次数（放宽以免同 NAT 用户互相影响） |
+| `ACCOUNTS_DISABLE_ID_DEFAULT` | `false` | 设为 `true` 关闭「默认密码=酷狗ID」，未设密码的账号须由 admin 先设置密码（公网部署推荐） |
+| `WEBUI_TRUST_PROXY` | - | 部署在反向代理后（Nginx/Caddy/Cloudflare Tunnel 等）时**必须**设为 `1`，以信任 `X-Forwarded-For` 取真实 IP（也可填代理跳数，如 `2`）；未设置或设为 `0`/`false` 则不信任（防伪造绕过防爆破），但外部请求会被视为同一个代理内网地址，账号防爆破的 IP 桶会互相拖累、二维码限流会被豁免 |
+| `WEBUI_PHONE_SEND_GLOBAL_LIMIT` | `20/60` | 发送短信验证码的全局限流（"次数/分钟"，即全服务每小时 20 次），防换号刷量；不依赖来源 IP；设为 `0/1` 关闭 |
+| `WEBUI_PHONE_SEND_PHONE_LIMIT` | `2/1440` | 发送短信验证码的手机号限流（每号 24 小时 2 次），防止本服务被当作短信轰炸机 |
+| `WEBUI_QR_GEN_IP_LIMIT` | `1/3` | 生成登录二维码的 IP 限流（每 IP 3 分钟 1 次，每次都会向酷狗申请新 key）；内网/本机豁免 |
+| `CRON_SCHEDULE` | `10 1 * * *` | 签到计划任务（cron 表达式），默认每天北京时间 01:10 |
+| `CRON_TIMEZONE` | `Asia/Shanghai` | 调度器使用的时区 |
+| `RUN_ON_STARTUP` | `false` | 设为 `true` 时容器启动后立即执行一次签到 |
+| `CHECKIN_CONCURRENCY` | 全部并行 | 多账号签到并发路数：默认有几个账号就几路全部并行；设 N 限最多 N 路；设 1 = 逐个串行（每账号内部仍保持 30s 的 VIP 领取节奏） |
+| `USERINFO` | - | 登录凭据（JSON 数组），与 Actions 的 Secret 格式一致；与凭据文件二选一 |
+| `USERINFO_FILE` | `/app/data/userinfo.json` | 凭据文件路径（位于挂载卷内，勿改）；入口脚本会自动读取并作为 `USERINFO` 注入 |
+| 通知渠道变量 | - | `WECOM_BOT_KEY`、`DINGTALK_BOT_KEY`、`FEISHU_BOT_KEY`、`TG_BOT_TOKEN` 等，与下文 Actions 通知 Secret 同名，建议写在 `.env` 中 |
+| `PAT` + `GITHUB_REPOSITORY` | - | 可选。仅当还想把每周刷新的 token 同步回 GitHub 仓库 Secret 时才需要 |
+
+### 数据与安全
+
+- 挂载卷 `./data/` 存放登录凭据（`userinfo.json`）和登录二维码，**请妥善保管，不要提交到仓库**（已加入 `.gitignore`）
+- 通知密钥、WebUI 密码等私密配置写在 `.env` 文件（已被 `.gitignore` 忽略，模板见 `.env.example`），**不要直接写进 docker-compose.yml 提交**
+- 每周日签到时候酷狗 token 会自动刷新并**写回 `data/userinfo.json`**，凭据长期有效，无需手动维护
+- `data/checkin_state.json` 记录当日已完成签到的账号，供手动触发"立即签到"时跳过（按北京时间日期滚动，跨天自动失效；删除该文件可强制重新执行）
+- 日期/星期计算固定按北京时间处理，与容器 `TZ` 无关；调度时区由 `CRON_TIMEZONE` 控制
+- 首次 `up` 后若报权限错误，执行 `sudo chown -R 1000:1000 ./data`（容器以 uid 1000 运行）后重启
+
+### 常用命令速查
+
+```bash
+docker compose up -d --build                                # 构建/更新并启动
+docker compose logs -f --tail 100                           # 跟踪日志
+docker compose down                                         # 停止并删除容器
+# WebUI 控制台: http://localhost:14725 （扫码登录 / 手机号登录 / 一键签到 / 账号管理）
+docker compose run --rm kgcheckin node scheduler.js once    # 命令行方式手动立即签到
+docker compose run --rm kgcheckin node scheduler.js next    # 预览接下来 3 次签到时间
+docker compose run --rm kgcheckin node qrcodeLogin.js gen   # 命令行生成登录二维码
+docker compose run --rm kgcheckin node qrcodeLogin.js wait  # 命令行等待扫码保存凭据
+docker compose pull && docker compose up -d --build         # 拉取新代码后更新
+```
+
 <details>
 
-<summary>⚠️部署教程(点击展开)⚠️</summary>
+<summary>⚠️Github Actions部署教程(点击展开)⚠️</summary>
 
 1. Fork 本仓库
 
@@ -72,6 +219,8 @@ GitHub Actions 实现 `酷狗概念VIP` 自动签到，每天领取总计 `两�
 
    添加手机号到 Secret `PHONE`，运行 Actions `手机号登录`，操作步骤选择「发送验证码」获取验证码，把验证码添加到 Secret `CODE`；再次运行 Actions `手机号登录`，操作步骤选择「登录」即可。
 
+   ⬆️ $${\color{red}与上文给仓库添加PAT秘钥同一位置}$$ ⬆️
+
 1. 启用 Actions `签到`，每天北京时间 01:10 自动签到（可在 `签到.yml` 中设置 cron）。启用 Actions `仓库保活` 以保证签到可以长期执行。
 
 1. （可选）配置运行结果通知
@@ -100,6 +249,34 @@ GitHub Actions 实现 `酷狗概念VIP` 自动签到，每天领取总计 `两�
    | 邮箱 SMTP | `MAIL_TO` | 收件邮箱地址 |
 
    通知内容包含：运行日期、账号数量、成功/失败统计、各账号听歌领取状态、VIP 领取次数、VIP 到期时间、错误信息等。
+
+### 按账号的失效邮件提醒（可选）
+
+上面的 `MAIL_TO` 只通知「配置者本人」。如果这个 WebUI 给多个用户使用，还可以让每个用户**自己预留邮箱**，之后某个账号的登录凭据失效时，系统只给该账号的用户单独发一封提醒邮件。
+
+工作方式：
+
+1. 用户在 WebUI 里扫码登录 / 手机号登录成功后，会弹出「预留通知邮箱」，填邮箱 → 收 6 位验证码 → 验证通过才落库；也可以随时在「账号管理」里补绑、更换或解绑。跳过不影响签到。
+2. 每天签到遇到酷狗返回 `error_code == 20018`（登录凭据失效）时，`main.js` 会给这些账号里「已绑定且已验证邮箱」的用户各发一封提醒邮件，正文说明账号、发现时间、原因和处理方式。
+3. 同一账号默认 **7 天最多提醒一次**；重新登录成功后标记会被清除，若再次失效可立即再收到提醒。
+
+以下环境变量仅在用到该功能时才需要配置（默认值即为推荐值）：
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `MAIL_HOST` / `MAIL_PORT` / `MAIL_USER` / `MAIL_PASS` | - | 复用上面的 SMTP 发件配置；缺任一则无法绑定邮箱、也不发失效提醒 |
+| `MAIL_FROM_NAME` | `酷狗签到助手` | 发件人显示名（From 头里的名称部分） |
+| `MAIL_INVALID_NOTIFY` | 开启 | 设为 `false` / `0` 关闭按账号的失效邮件 |
+| `MAIL_NOTICE_COOLDOWN_DAYS` | `7` | 同一账号的提醒冷却天数（最小 1） |
+| `WEBUI_EMAIL_SEND_USER_LIMIT` | `3/60` | 验证码发送限流：每账号每小时次数（按账号计数，不依赖来源 IP） |
+| `WEBUI_PUBLIC_URL` | 空 | WebUI 公网地址，会附加在失效邮件正文里方便点开重新登录 |
+
+说明与限制：
+
+- 邮箱验证码只存在内存中（10 分钟有效，最多试 5 次），服务重启后需重新获取，不影响已绑定的邮箱。
+- 邮箱以明文保存在 `data/userinfo.json` 的账号条目里（与 token 同文件、同权限）；服务端日志与验证码提示一律脱敏为 `ab***@example.com`，「账号管理」面板（需独立密码解锁）内显示完整地址，便于用户核对自己填的是否正确。
+- 不配置 SMTP 时，WebUI 里的「绑定邮箱」按钮会禁用，账号面板顶部横幅也会说明原因。
+- 已失效的历史账号不会被补发：只有「失效前已完成验证的邮箱」才会收到提醒。
 
 API源代码来自 [MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) ~~图省事直接搬来~~
 

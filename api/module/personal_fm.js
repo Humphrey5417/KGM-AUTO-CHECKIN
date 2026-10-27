@@ -8,7 +8,7 @@ module.exports = (params, useAxios) => {
   const dataMap = {
     appid,
     clienttime: dateTime,
-    mid: '',
+    mid: params?.cookie?.KUGOU_API_MID,
     action: params?.action || 'play',
     recommend_source_locked: 0,
     song_pool_id: Number(params?.song_pool_id || 0),
@@ -34,6 +34,7 @@ module.exports = (params, useAxios) => {
   if (params?.hash) dataMap['hash'] = params.hash;
   if (params?.songid) dataMap['songid'] = params.songid;
   if (params?.playtime) dataMap['playtime'] = params.playtime;
+  if (params?.cur_mark) dataMap['cur_mark'] = params.cur_mark;
 
   return useAxios({
     url: '/v2/personal_recommend',

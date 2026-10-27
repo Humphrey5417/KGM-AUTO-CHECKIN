@@ -22,7 +22,6 @@ on:
         options:
           - 否
           - 是
-# 需要 contents: write 才能创建 Release 上传二维码直链
 permissions:
   contents: write
 jobs:
@@ -31,10 +30,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 创建 Node 环境
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: 'npm'
@@ -51,33 +50,15 @@ jobs:
           fi
           gh --version
 
-      - name: 缓存依赖
-        id: cache-npm
-        uses: actions/cache@v4
-        with:
-          path: ./api/node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('./api/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-
       - name: 安装依赖
         run: npm run install
-        if: ${{ steps.cache-npm.outputs.cache-hit != 'true' }}
 
-      # ════════════════════════════════════════════
-      #   步骤一：生成二维码 → PNG + Summary + HTML 登录页
-      #   ✅ 完成后立即结束 step（process.exit(0) 保证干净退出）
-      #   ════════════════════════════════════════════
       - name: 生成二维码图片与HTML登录页
         id: gen
         run: node qrcodeLogin.js gen
         env:
           NUMBER: ${{ github.event.inputs.number }}
 
-      # ════════════════════════════════════════════
-      #   步骤二（核心）：发布二维码为 GitHub Release 直链
-      #   浏览器点击链接即显示图片/网页，无需下载解压
-      #   ════════════════════════════════════════════
       - name: 发布二维码图片直链（👈 点击即可查看，无需下载解压）
         id: publish
         if: ${{ always() && steps.gen.outcome == 'success' }}
@@ -114,10 +95,9 @@ jobs:
             echo "⏳ 二维码有效期约 2 分钟，请尽快扫描"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ═══ 备用：HTML 仍上传为 artifact（万一 Release 失败兜底）═══
       - name: 上传二维码 HTML 页面（兜底备份）
         if: ${{ always() && steps.gen.outcome == 'success' && steps.publish.outcome != 'success' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: 二维码HTML
           path: |
@@ -126,7 +106,6 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
-      # ═══ 错误处理 ═══
       - name: 二维码生成失败提示
         if: ${{ failure() }}
         run: |
@@ -136,9 +115,6 @@ jobs:
           echo "  1️⃣ 运行器网络是否能访问酷狗接口（查看上方步骤日志）"
           echo "  2️⃣ npm 依赖安装是否成功"
 
-      # ════════════════════════════════════════════
-      #   步骤三：轮询等待用户扫码确认
-      #   ════════════════════════════════════════════
       - name: 等待扫码登录
         if: ${{ always() && steps.gen.outcome == 'success' }}
         run: node qrcodeLogin.js wait
@@ -149,19 +125,22 @@ jobs:
           PAT: ${{ secrets.PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
 
-      # ═══ 清理：登录完成后立即删除本次 Release（不堆积）═══
-      - name: 清理本次二维码 Release
+      - name: 清理本次二维码 Release 与 Tag
         if: ${{ always() && steps.publish.outcome == 'success' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="qr-${{ github.run_id }}"
-          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" -y 2>/dev/null \
-            && echo "✅ 已删除本次 Release: $TAG" || echo "⚠️ Release $TAG 不存在或已删除"
+          # 删除 Release（--cleanup-tag 同时删除关联的 Git Tag）
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" -y --cleanup-tag 2>/dev/null \
+            && echo "✅ 已删除本次 Release 与 Tag: $TAG" || echo "⚠️ Release $TAG 不存在或已删除"
+          # 兜底：确保 Git Tag 也被删除（防止旧版本 gh 不支持 --cleanup-tag）
+          git tag -d "$TAG" 2>/dev/null || true
+          git push --delete origin "$TAG" 2>/dev/null \
+            && echo "✅ 已删除远程 Tag: $TAG" || echo "ℹ️ 远程 Tag $TAG 不存在或已清理"
 
-      # ═══ 兜底：清理残留的旧二维码 Release（保留最近 3 个）═══
-      - name: 清理旧的二维码 Release
+      - name: 清理旧的二维码 Release 与 Tag
         if: ${{ always() }}
         continue-on-error: true
         env:
@@ -170,6 +149,8 @@ jobs:
           gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
             | awk '$1 ~ /^qr-/ {print $1}' | head -n -3 \
             | while read t; do
-                gh release delete "$t" --repo "$GITHUB_REPOSITORY" -y 2>/dev/null
-                echo "已删除旧 Release: $t"
+                gh release delete "$t" --repo "$GITHUB_REPOSITORY" -y --cleanup-tag 2>/dev/null
+                git tag -d "$t" 2>/dev/null || true
+                git push --delete origin "$t" 2>/dev/null || true
+                echo "已删除旧 Release 与 Tag: $t"
               done || true

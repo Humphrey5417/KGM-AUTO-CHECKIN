@@ -1,0 +1,2 @@
+# shell 脚本必须保持 LF，否则 Linux/Docker 容器内会报 bad interpreter 无法执行
+*.sh text eol=lf

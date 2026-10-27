@@ -59,7 +59,15 @@ async function sendDingTalk(title, content, key, secret) {
       markdown: { title, text: `### ${title}\n\n${content}` },
     }),
   })
-  return resp.ok
+  // 钉钉接口即使 HTTP 200 也可能业务失败（errcode != 0），必须解析响应体，
+  // 否则关键词不匹配 / 加签错误 / access_token 无效 / IP 白名单等都会被
+  // 误判为发送成功。失败时打印真实原因并返回 false。
+  const data = await resp.json().catch(() => null)
+  if (!data || data.errcode !== 0) {
+    printRed(`钉钉发送失败: ${data?.errmsg || `HTTP ${resp.status}`}`)
+    return false
+  }
+  return true
 }
 
 // 3. 飞书机器人
@@ -151,13 +159,27 @@ async function sendDiscord(title, content, webhookUrl) {
   return resp.ok
 }
 
+// 邮件头部非 ASCII 文本按 RFC 2047 编码；纯 ASCII 原样返回，避免多余编码。
+function encodeMailHeader(text) {
+  const s = String(text ?? '').trim()
+  if (!s) return ''
+  if (/^[\x20-\x7e]*$/.test(s)) return s
+  return `=?UTF-8?B?${Buffer.from(s, 'utf8').toString('base64')}?=`
+}
+
 // 10. 邮箱 SMTP（使用 node:net/node:tls 实现最小 SMTP 客户端）
-// 支持隐式 TLS（端口 465）和 STARTTLS（端口 587/25）
+// 支持隐式 TLS（端口 465）和 STARTTLS（端口 587/25）。
+// 安全约束：凭据仅在「已加密连接 + 服务器声明 AUTH 能力」后发送；
+// 若无法建立加密连接则直接失败，绝不明文传输密码。
+// cfg.to 为目标收件人；from / fromName 可选，默认发件人即认证账号，
+// 这样同一套 SMTP 凭据既能发给管理员，也能按账号发给用户本人。
 function sendMailSMTP(title, content, cfg) {
   return new Promise((resolve, reject) => {
-    const { host, port, user, pass, to } = cfg
-    const from = user
-    const subject = `=?UTF-8?B?${Buffer.from(title).toString('base64')}?=`
+    const { host, port, user, pass, to, fromName } = cfg
+    const from = cfg.from || user
+    const subject = encodeMailHeader(title)
+    // 带显示名时用 "名称 <地址>" 形式，显示名按 RFC 2047 编码
+    const fromHeader = fromName ? `${encodeMailHeader(fromName)} <${from}>` : from
     const date = new Date().toUTCString()
     const messageId = `<${Date.now()}.${Math.random().toString(36).slice(2)}@kgcheckin>`
 
@@ -166,7 +188,7 @@ function sendMailSMTP(title, content, cfg) {
     const safeContent = String(content).replace(/^\./gm, '..')
 
     const mailBody = [
-      `From: ${from}`,
+      `From: ${fromHeader}`,
       `To: ${to}`,
       `Subject: ${subject}`,
       `Date: ${date}`,
@@ -178,43 +200,47 @@ function sendMailSMTP(title, content, cfg) {
       safeContent,
     ].join('\r\n')
 
-    // 隐式 TLS (465) 直接 TLS 连接；STARTTLS (587/25) 先明文再升级
+    // 隐式 TLS (465) 直接 TLS 连接；其他端口先明文再 STARTTLS 升级
     const smtpPort = Number(port) || 465
     const useSTARTTLS = smtpPort !== 465
 
     // SMTP 会话状态机
-    // 隐式 TLS:  GREETING → EHLO_SENT → AUTH 流程
-    // STARTTLS:  GREETING → EHLO_SENT → STARTTLS_SENT → TLS_UPGRADED → EHLO2_SENT → AUTH 流程
+    // 隐式 TLS:  GREETING → EHLO_SENT → AUTH_USER → AUTH_PASS → MAIL → RCPT → DATA → DATA_DONE
+    // STARTTLS:  GREETING → EHLO_SENT → STARTTLS_SENT → EHLO2_SENT → AUTH_USER → …（同上）
     let state = 'GREETING'
     let buffer = ''
     let socket
-    let tlsSocket
     let timer
     let completed = false
     let settled = false
+    let encrypted = !useSTARTTLS   // 隐式 TLS 时连接建立即为加密
+    let serverAuthAdvertised = false
+    let serverStartTlsAdvertised = false
     function finish(success, err) {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      try { if (socket && !socket.destroyed) socket.destroy() } catch { /* 忽略 */ }
       if (success) resolve(true)
       else reject(err || new Error('SMTP 会话异常终止'))
     }
 
-    // AUTH 流程命令序列（EHLO 之后依次执行）
-    const authCommands = [
-      'AUTH LOGIN',
-      Buffer.from(user).toString('base64'),
-      Buffer.from(pass).toString('base64'),
-      `MAIL FROM:<${from}>`,
-      `RCPT TO:<${to}>`,
-      'DATA',
-      mailBody.replace(/\r?\n/g, '\r\n') + '\r\n.',
-      'QUIT',
-    ]
-    let authStep = 0
-
     function sendCmd(cmd) {
       socket.write(cmd + '\r\n')
+    }
+
+    /** 进入 AUTH 流程前的安全检查：必须已加密，且服务器声明支持 AUTH */
+    function beginAuth() {
+      if (!encrypted) {
+        finish(false, new Error('SMTP 连接未加密，拒绝发送凭据（请使用 465 或启用 STARTTLS）'))
+        return
+      }
+      if (!serverAuthAdvertised) {
+        finish(false, new Error('SMTP 服务器未声明 AUTH 能力，无法认证'))
+        return
+      }
+      state = 'AUTH_USER'
+      sendCmd('AUTH LOGIN')
     }
 
     function processData(line) {
@@ -224,6 +250,12 @@ function sendMailSMTP(title, content, cfg) {
         socket.destroy()
         finish(false, new Error(`SMTP 错误: ${line}`))
         return
+      }
+
+      // 解析 EHLO 能力声明（可能跨多行，续行形如 "250-XXX"）
+      if (state === 'EHLO_SENT' || state === 'EHLO2_SENT') {
+        if (/AUTH[\s=]/i.test(line)) serverAuthAdvertised = true
+        if (/STARTTLS/i.test(line)) serverStartTlsAdvertised = true
       }
 
       // 等待多行响应结束（中间行以 "code-" 开头，最后一行以 "code " 开头）
@@ -238,52 +270,121 @@ function sendMailSMTP(title, content, cfg) {
 
         case 'EHLO_SENT':
           if (useSTARTTLS) {
-            // STARTTLS 模式：EHLO 响应后发送 STARTTLS
+            if (code !== 250) {
+              finish(false, new Error(`EHLO 失败: ${line}`))
+              return
+            }
+            // 非 465 端口必须完成 STARTTLS 升级后才能认证。
+            // 注意：这里只认 STARTTLS 能力，不能因为服务器声明了 AUTH 就放行——
+            // 明文连接上发送凭据等同于泄露密码。
+            if (!serverStartTlsAdvertised) {
+              finish(false, new Error('SMTP 服务器不支持 STARTTLS，拒绝在明文连接上发送凭据（请改用 465 端口）'))
+              return
+            }
             sendCmd('STARTTLS')
             state = 'STARTTLS_SENT'
           } else {
-            // 隐式 TLS：直接进入 AUTH 流程
-            state = 'AUTH'
-            authStep = 0
-            sendCmd(authCommands[authStep++])
+            // 隐式 TLS：连接本身已加密，直接进入 AUTH 流程
+            beginAuth()
           }
           break
 
-        case 'STARTTLS_SENT':
+        case 'STARTTLS_SENT': {
           // 收到 220 → 升级为 TLS
           if (code !== 220) {
-            socket.destroy()
             finish(false, new Error(`STARTTLS 失败: ${line}`))
             return
           }
-          tlsSocket = tls.connect({ socket, host, rejectUnauthorized: true })
+          const tlsSocket = tls.connect({ socket, host, rejectUnauthorized: true })
           tlsSocket.setEncoding('utf8')
           tlsSocket.on('data', (chunk) => { handleChunk(chunk) })
           tlsSocket.on('end', () => finish(completed))
           tlsSocket.on('close', () => finish(completed))
           tlsSocket.on('error', (err) => finish(false, err))
           socket = tlsSocket
-          // 升级后重新发送 EHLO
+          encrypted = true
+          // 升级后重新发送 EHLO（能力列表以本次为准）
+          serverAuthAdvertised = false
           sendCmd('EHLO kgcheckin')
           state = 'EHLO2_SENT'
           break
+        }
 
         case 'EHLO2_SENT':
           // STARTTLS 升级后的第二次 EHLO 响应 → 进入 AUTH 流程
-          state = 'AUTH'
-          authStep = 0
-          sendCmd(authCommands[authStep++])
+          beginAuth()
           break
 
-        case 'AUTH':
-          if (authStep < authCommands.length) {
-            const cmd = authCommands[authStep]
-            // 邮件内容已被服务器接受（DATA 后的终止响应）→ 视为发送成功
-            if (cmd === 'QUIT') completed = true
-            sendCmd(authCommands[authStep++])
-          } else if (code === 221) {
-            completed = true
+        case 'AUTH_USER':
+          // 服务器返回 334 挑战后发送用户名
+          if (code !== 334) {
+            finish(false, new Error(`AUTH LOGIN 未被接受: ${line}`))
+            return
           }
+          sendCmd(Buffer.from(user).toString('base64'))
+          state = 'AUTH_PASS'
+          break
+
+        case 'AUTH_PASS':
+          // 发送密码
+          if (code !== 334) {
+            finish(false, new Error(`AUTH 用户名未被接受: ${line}`))
+            return
+          }
+          sendCmd(Buffer.from(pass).toString('base64'))
+          state = 'AUTH_DONE'
+          break
+
+        case 'AUTH_DONE':
+          // 认证结果：235 成功
+          if (code !== 235) {
+            finish(false, new Error(`SMTP 认证失败: ${line}`))
+            return
+          }
+          sendCmd(`MAIL FROM:<${from}>`)
+          state = 'MAIL'
+          break
+
+        case 'MAIL':
+          if (code !== 250) {
+            finish(false, new Error(`MAIL FROM 被拒绝: ${line}`))
+            return
+          }
+          sendCmd(`RCPT TO:<${to}>`)
+          state = 'RCPT'
+          break
+
+        case 'RCPT':
+          if (code !== 250 && code !== 251) {
+            finish(false, new Error(`RCPT TO 被拒绝: ${line}`))
+            return
+          }
+          sendCmd('DATA')
+          state = 'DATA'
+          break
+
+        case 'DATA':
+          if (code !== 354) {
+            finish(false, new Error(`DATA 未被接受: ${line}`))
+            return
+          }
+          socket.write(mailBody.replace(/\r?\n/g, '\r\n') + '\r\n.\r\n')
+          state = 'DATA_DONE'
+          break
+
+        case 'DATA_DONE':
+          // 仅当服务器明确返回 250（邮件已接受）才判定成功
+          if (code !== 250) {
+            finish(false, new Error(`邮件未被服务器接受: ${line}`))
+            return
+          }
+          completed = true
+          sendCmd('QUIT')
+          state = 'QUIT_SENT'
+          break
+
+        case 'QUIT_SENT':
+          finish(completed)
           break
       }
     }
@@ -296,17 +397,17 @@ function sendMailSMTP(title, content, cfg) {
         const line = buffer.slice(0, idx)
         buffer = buffer.slice(idx + 2)
         processData(line)
+        if (settled) return
       }
     }
 
     // 超时保护
     timer = setTimeout(() => {
-      if (socket) socket.destroy()
       finish(false, new Error('SMTP 超时'))
     }, 15000)
 
     if (useSTARTTLS) {
-      // STARTTLS：先明文连接
+      // STARTTLS：先明文连接，升级前不会发送任何凭据
       socket = net.connect(smtpPort, host, () => {})
     } else {
       // 隐式 TLS：直接 TLS 连接
@@ -373,6 +474,7 @@ async function sendNotify(title, content) {
         user: process.env.MAIL_USER,
         pass: process.env.MAIL_PASS,
         to: process.env.MAIL_TO,
+        fromName: process.env.MAIL_FROM_NAME || '酷狗签到助手',
       }),
     })
   }
@@ -403,4 +505,4 @@ async function sendNotify(title, content) {
   printYellow(`通知发送完成: ${success} 成功, ${fail} 失败`)
 }
 
-export { sendNotify }
+export { sendNotify, sendMailSMTP }

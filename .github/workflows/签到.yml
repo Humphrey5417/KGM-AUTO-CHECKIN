@@ -1,46 +1,32 @@
 name: 签到
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *'
+    # GitHub Actions 的 schedule 只支持 UTC，不支持 timezone 字段。
+    # UTC 17:10 = 北京时间 01:10（次日）
+    - cron: "10 17 * * *"
+  workflow_dispatch:
+
 permissions:
   contents: read
+  actions: write
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 30
     steps:
-      - name: 随机延迟（仅定时触发，落在北京时间 08:00-10:00）
-        if: ${{ github.event_name == 'schedule' }}
-        run: |
-          DELAY=$(( RANDOM % 121 ))
-          echo "随机延迟 ${DELAY} 分钟，预计北京时间 08:00 后约 ${DELAY} 分触发签到"
-          sleep ${DELAY}m
-
       - name: 检出仓库
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: 创建 Node 环境
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: 'npm'
           cache-dependency-path: ./api/package-lock.json
 
-      - name: 检查 GitHub CLI
-        run: |
-          if ! command -v gh >/dev/null 2>&1; then
-            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-            sudo apt update
-            sudo apt install gh -y
-          fi
-          gh --version
-
       - name: 缓存依赖
         id: cache-npm
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ./api/node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('./api/package-lock.json') }}
@@ -48,8 +34,8 @@ jobs:
             ${{ runner.os }}-node-
 
       - name: 安装依赖
-        if: ${{ steps.cache-npm.outputs.cache-hit != 'true' }}
         run: npm run install
+        if: ${{ steps.cache-npm.outputs.cache-hit != 'true' }}
 
       - name: 执行签到
         run: npm run main
@@ -57,6 +43,7 @@ jobs:
           USERINFO: ${{ secrets.USERINFO }}
           PAT: ${{ secrets.PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # 通知渠道
           WECOM_BOT_KEY: ${{ secrets.WECOM_BOT_KEY }}
           DINGTALK_BOT_KEY: ${{ secrets.DINGTALK_BOT_KEY }}
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
